@@ -44,5 +44,7 @@ Install required packages:
 ```bash
 pip install selenium pandas openpyxl beautifulsoup4 webdriver-manager
 
+---
+
 ## ▶️ How to Run
 Run the script:
