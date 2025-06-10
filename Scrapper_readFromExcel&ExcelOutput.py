@@ -20,11 +20,13 @@ def process_single_name(first_name, last_name):
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     FIELDS = [
-        "ID", "First Name", "Middle Name", "Last Name", "License Number", "License Type",
+        "First Name", "Middle Name", "Last Name", "License Number", "License Type",
         "License Status", "Expiration Date", "Secondary Status", "City", "State", "County", "Zip"
     ]
 
     results = []
+    match_found = False
+
     try:
         driver.get("https://search.dca.ca.gov/?BD=19&TP=DC")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "firstName"))).send_keys(first_name)
@@ -32,7 +34,24 @@ def process_single_name(first_name, last_name):
         driver.find_element(By.ID, "licenseType").send_keys("Certified Public Accountant")
         driver.find_element(By.ID, "srchSubmitHome").click()
 
-        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'article.post')))
+        try:
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'article.post')))
+        except TimeoutException:
+            print(f"❌ No results returned for: {first_name} {last_name}")
+            return [{
+                "First Name": first_name,
+                "Middle Name": "Not Found",
+                "Last Name": last_name,
+                "License Number": "Not Found",
+                "License Type": "Not Found",
+                "License Status": "Not Found",
+                "Expiration Date": "Not Found",
+                "Secondary Status": "Not Found",
+                "City": "Not Found",
+                "State": "Not Found",
+                "County": "Not Found",
+                "Zip": "Not Found"
+            }]
 
         last_count, retries = 0, 0
         while retries < 10:
@@ -46,15 +65,13 @@ def process_single_name(first_name, last_name):
             else:
                 retries += 1
 
-        print(f"\n🔍 Processing {current_count} results for: {first_name} {last_name}")
-        match_found = False
-        id_counter = 0
+        print(f"\n🔍 Found {last_count} total records for: {first_name} {last_name}")
 
-        for article in driver.find_elements(By.CSS_SELECTOR, 'article.post'):
-            row = {field: "" for field in FIELDS}
-            row["ID"] = id_counter
+        for idx, article in enumerate(driver.find_elements(By.CSS_SELECTOR, 'article.post')):
+            data = {field: "" for field in FIELDS}
             try:
-                for li in article.find_elements(By.CSS_SELECTOR, "ul.actions li"):
+                li_items = article.find_elements(By.CSS_SELECTOR, "ul.actions li")
+                for li in li_items:
                     html = li.get_attribute("innerHTML")
                     soup = BeautifulSoup(html, "html.parser")
                     text = soup.get_text(separator=" ", strip=True)
@@ -63,37 +80,38 @@ def process_single_name(first_name, last_name):
                         try:
                             last, first_middle = text.split(",", 1)
                             name_parts = first_middle.strip().split()
-                            row["Last Name"] = clean_text(last)
-                            row["First Name"] = name_parts[0] if name_parts else ""
-                            row["Middle Name"] = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
-                        except:
-                            row["Last Name"] = text
+                            data["Last Name"] = clean_text(last)
+                            data["First Name"] = name_parts[0] if name_parts else ""
+                            data["Middle Name"] = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+                        except ValueError:
+                            data["Last Name"] = text
                     elif ":" in text:
                         key, value = [clean_text(x) for x in text.split(":", 1)]
-                        if key in row:
-                            row[key] = value
+                        if key in data:
+                            data[key] = value
 
-                print(f"🔹 ID {id_counter} → {row}")
+                print(f"📄 Record #{idx}")
+                for k, v in data.items():
+                    print(f"   {k}: {v}")
+                print("")
 
-                if (
-                    row["First Name"].lower() == first_name.lower() and
-                    row["Last Name"].lower() == last_name.lower() and
-                    row["State"].lower() == "california"
-                ):
-                    results.append(row)
-                    print(f"✅ MATCH FOUND (CA) for: {first_name} {last_name}")
+                if (data["State"].strip().lower() == "california" and
+                    data["First Name"].strip().lower() == first_name.strip().lower() and
+                    data["Last Name"].strip().lower() == last_name.strip().lower()):
+                    results.append(data)
                     match_found = True
-
+                    print(f"✅ Match found for: {first_name} {last_name}")
             except Exception as e:
-                print(f"⚠️ Error parsing article ID {id_counter}: {e}")
-            id_counter += 1
+                print(f"⚠️ Error parsing record #{idx}: {e}")
+
+    finally:
+        driver.quit()
 
         if not match_found:
-            print(f"❌ No exact CA match: {first_name} {last_name}")
+            print(f"❌ No exact match found in California for: {first_name} {last_name}")
             results.append({
-                "ID": "N/A",
                 "First Name": first_name,
-                "Middle Name": "",
+                "Middle Name": "Not Found",
                 "Last Name": last_name,
                 "License Number": "Not Found",
                 "License Type": "Not Found",
@@ -106,40 +124,19 @@ def process_single_name(first_name, last_name):
                 "Zip": "Not Found"
             })
 
-    except TimeoutException:
-        print(f"⏱️ Timeout for: {first_name} {last_name}")
-        results.append({
-            "ID": "N/A",
-            "First Name": first_name,
-            "Middle Name": "",
-            "Last Name": last_name,
-            "License Number": "Timeout",
-            "License Type": "Timeout",
-            "License Status": "Timeout",
-            "Expiration Date": "Timeout",
-            "Secondary Status": "Timeout",
-            "City": "Timeout",
-            "State": "Timeout",
-            "County": "Timeout",
-            "Zip": "Timeout"
-        })
-    finally:
-        driver.quit()
         return results
 
 def main():
     df = pd.read_excel("names.xlsx", skiprows=3)
     all_results = []
-
     for _, row in df.iterrows():
         first_name = str(row[0]).strip()
         last_name = str(row[1]).strip()
         if first_name and last_name:
-            results = process_single_name(first_name, last_name)
-            all_results.extend(results)
+            all_results.extend(process_single_name(first_name, last_name))
 
     pd.DataFrame(all_results).to_excel("california_matches.xlsx", index=False)
-    print("\n✅ All results saved to california_matches.xlsx")
+    print("\n✅ Done! Results saved to california_matches.xlsx")
 
 if __name__ == "__main__":
     main()
