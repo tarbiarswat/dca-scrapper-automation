@@ -1,4 +1,4 @@
-#Adds status column in excel output for exact matches
+#Adds status column in excel output for exact matches with custom column autofit width
 
 import time
 import pandas as pd
@@ -11,6 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
+from openpyxl import load_workbook
 
 def clean_text(text):
     return text.replace("\xa0", " ").strip()
@@ -114,17 +115,17 @@ def process_single_name(first_name, last_name):
             print(f"❌ No exact match found in California for: {first_name} {last_name}")
             results.append({
                 "First Name": first_name,
-                "Middle Name": "Not Found",
+                "Middle Name": " - ",
                 "Last Name": last_name,
-                "License Number": "Not Found",
-                "License Type": "Not Found",
-                "License Status": "Not Found",
-                "Expiration Date": "Not Found",
-                "Secondary Status": "Not Found",
-                "City": "Not Found",
-                "State": "Not Found",
-                "County": "Not Found",
-                "Zip": "Not Found",
+                "License Number": " - ",
+                "License Type": " - ",
+                "License Status": " - ",
+                "Expiration Date": " - ",
+                "Secondary Status": " - ",
+                "City": " - ",
+                "State": " - ",
+                "County": " - ",
+                "Zip": " - ",
                 "Match Status": "Not Found"
             })
 
@@ -139,8 +140,23 @@ def main():
         if first_name and last_name:
             all_results.extend(process_single_name(first_name, last_name))
 
-    pd.DataFrame(all_results).to_excel("california_matches.xlsx", index=False)
-    print("\n✅ Done! Results saved to california_matches.xlsx")
+    output_path = "california_matches.xlsx"
+    df_result = pd.DataFrame(all_results)
+    df_result.to_excel(output_path, index=False)
+
+    # Auto-adjust column widths
+    wb = load_workbook(output_path)
+    ws = wb.active
+    for column_cells in ws.columns:
+        max_length = 0
+        column_letter = column_cells[0].column_letter
+        for cell in column_cells:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        ws.column_dimensions[column_letter].width = max_length + 2
+    wb.save(output_path)
+
+    print(f"\n✅ Done! Results saved to '{output_path}' with auto-adjusted column widths.")
 
 if __name__ == "__main__":
     main()
